@@ -1,4 +1,5 @@
 import admin from 'firebase-admin';
+import { getFirestore as getFirestoreSdk } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -20,27 +21,25 @@ export async function initFirebase() {
           credential: admin.credential.cert(serviceAccount)
         });
       }
-      firestoreDb = admin.firestore();
 
-      // Test whether Firestore Database is created and active
-      try {
-        await firestoreDb.collection('system').limit(1).get();
-        isFirestoreHealthy = true;
-        console.log(`🔥 [Firebase] Cloud Firestore is ACTIVE & CONNECTED to project: ${serviceAccount.project_id}!`);
-      } catch (checkErr) {
-        isFirestoreHealthy = false;
-        if (checkErr.message && checkErr.message.includes('not been used in project')) {
-          console.log('\n======================================================');
-          console.warn('⚠️  [Firebase Action Required]');
-          console.warn(`Firestore Database has not been created yet for project: ${serviceAccount.project_id}`);
-          console.warn(`👉 Visit: https://console.firebase.google.com/project/${serviceAccount.project_id}/firestore`);
-          console.warn('Click "Create database" -> choose a location (e.g. asia-south1 or nam5) -> Start in test mode.');
-          console.warn('⚡ Using instant local database in the meantime - zero downtime!');
-          console.log('======================================================\n');
-        } else {
-          console.warn('⚠️  [Firebase Notice]:', checkErr.message);
+      // Automatically connect to the active Firestore database ('default' or '(default)')
+      for (const dbId of ['default', '(default)', undefined]) {
+        try {
+          const dbInstance = dbId ? getFirestoreSdk(dbId) : getFirestoreSdk();
+          await dbInstance.collection('system').limit(1).get();
+          firestoreDb = dbInstance;
+          isFirestoreHealthy = true;
+          console.log(`🔥 [Firebase] Cloud Firestore is ACTIVE & CONNECTED to: ${serviceAccount.project_id} (database: ${dbId || 'default'})!`);
+          break;
+        } catch (connErr) {
+          // try next dbId
         }
       }
+
+      if (!isFirestoreHealthy) {
+        console.warn(`⚠️ [Firebase] Could not reach Firestore instance yet for ${serviceAccount.project_id}. Using local database fallback.`);
+      }
+
       return firestoreDb;
     } catch (err) {
       console.warn('⚠️ [Firebase] Failed to parse serviceAccountKey.json:', err.message);
@@ -56,9 +55,16 @@ export async function initFirebase() {
           })
         });
       }
-      firestoreDb = admin.firestore();
-      isFirestoreHealthy = true;
-      console.log('🔥 [Firebase] Connected via environment credentials!');
+      for (const dbId of ['default', '(default)', undefined]) {
+        try {
+          const dbInstance = dbId ? getFirestoreSdk(dbId) : getFirestoreSdk();
+          await dbInstance.collection('system').limit(1).get();
+          firestoreDb = dbInstance;
+          isFirestoreHealthy = true;
+          console.log(`🔥 [Firebase] Cloud Firestore is ACTIVE & CONNECTED via env vars!`);
+          break;
+        } catch (e) {}
+      }
       return firestoreDb;
     } catch (err) {
       console.warn('⚠️ [Firebase] Failed to initialize from env vars:', err.message);
