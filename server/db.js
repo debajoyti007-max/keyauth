@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 import { getFirestore } from './firebase.js';
@@ -253,8 +252,15 @@ export const db = {
   async getSettings() {
     const firestore = getFirestore();
     if (firestore) {
-      const doc = await firestore.collection('system').doc('settings').get();
-      if (doc.exists) return doc.data();
+      try {
+        const doc = await firestore.collection('system').doc('settings').get();
+        if (doc.exists) return doc.data();
+        const initial = loadLocalData().settings;
+        await firestore.collection('system').doc('settings').set(initial);
+        return initial;
+      } catch (err) {
+        // Fallback to local
+      }
     }
     const data = loadLocalData();
     return data.settings;
@@ -263,7 +269,9 @@ export const db = {
   async updateSettings(updates) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('system').doc('settings').set(updates, { merge: true });
+      try {
+        await firestore.collection('system').doc('settings').set(updates, { merge: true });
+      } catch (err) {}
     }
     const data = loadLocalData();
     data.settings = { ...data.settings, ...updates };
@@ -275,12 +283,16 @@ export const db = {
   async getKeys(filter = {}) {
     const firestore = getFirestore();
     if (firestore) {
-      let query = firestore.collection('keys');
-      if (filter.created_by) query = query.where('created_by', '==', filter.created_by);
-      const snapshot = await query.get();
-      const keys = [];
-      snapshot.forEach(doc => keys.push({ id: doc.id, ...doc.data() }));
-      return keys;
+      try {
+        let query = firestore.collection('keys');
+        if (filter.created_by) query = query.where('created_by', '==', filter.created_by);
+        const snapshot = await query.get();
+        if (!snapshot.empty) {
+          const keys = [];
+          snapshot.forEach(doc => keys.push({ id: doc.id, ...doc.data() }));
+          return keys;
+        }
+      } catch (err) {}
     }
     const data = loadLocalData();
     if (checkExpirations(data.keys)) saveLocalData(data);
@@ -295,9 +307,10 @@ export const db = {
     if (!user_key) return null;
     const firestore = getFirestore();
     if (firestore) {
-      const doc = await firestore.collection('keys').doc(user_key).get();
-      if (doc.exists) return { id: doc.id, ...doc.data() };
-      return null;
+      try {
+        const doc = await firestore.collection('keys').doc(user_key).get();
+        if (doc.exists) return { id: doc.id, ...doc.data() };
+      } catch (err) {}
     }
     const data = loadLocalData();
     if (checkExpirations(data.keys)) saveLocalData(data);
@@ -307,7 +320,9 @@ export const db = {
   async createKey(keyData) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('keys').doc(keyData.user_key).set(keyData);
+      try {
+        await firestore.collection('keys').doc(keyData.user_key).set(keyData);
+      } catch (err) {}
     }
     const data = loadLocalData();
     data.keys.unshift(keyData);
@@ -318,7 +333,9 @@ export const db = {
   async updateKey(user_key, updates) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('keys').doc(user_key).set(updates, { merge: true });
+      try {
+        await firestore.collection('keys').doc(user_key).set(updates, { merge: true });
+      } catch (err) {}
     }
     const data = loadLocalData();
     const idx = data.keys.findIndex(k => k.user_key.toLowerCase() === user_key.trim().toLowerCase());
@@ -333,7 +350,9 @@ export const db = {
   async deleteKey(user_key) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('keys').doc(user_key).delete();
+      try {
+        await firestore.collection('keys').doc(user_key).delete();
+      } catch (err) {}
     }
     const data = loadLocalData();
     data.keys = data.keys.filter(k => k.user_key.toLowerCase() !== user_key.trim().toLowerCase());
@@ -345,10 +364,14 @@ export const db = {
   async getUsers() {
     const firestore = getFirestore();
     if (firestore) {
-      const snapshot = await firestore.collection('users').get();
-      const users = [];
-      snapshot.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
-      return users;
+      try {
+        const snapshot = await firestore.collection('users').get();
+        if (!snapshot.empty) {
+          const users = [];
+          snapshot.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
+          return users;
+        }
+      } catch (err) {}
     }
     const data = loadLocalData();
     return data.users;
@@ -357,9 +380,10 @@ export const db = {
   async getUserById(id) {
     const firestore = getFirestore();
     if (firestore) {
-      const doc = await firestore.collection('users').doc(id).get();
-      if (doc.exists) return { id: doc.id, ...doc.data() };
-      return null;
+      try {
+        const doc = await firestore.collection('users').doc(id).get();
+        if (doc.exists) return { id: doc.id, ...doc.data() };
+      } catch (err) {}
     }
     const data = loadLocalData();
     return data.users.find(u => u.id === id) || null;
@@ -368,12 +392,13 @@ export const db = {
   async getUserByUsername(username) {
     const firestore = getFirestore();
     if (firestore) {
-      const snapshot = await firestore.collection('users').where('username', '==', username).limit(1).get();
-      if (!snapshot.empty) {
-        const doc = snapshot.docs[0];
-        return { id: doc.id, ...doc.data() };
-      }
-      return null;
+      try {
+        const snapshot = await firestore.collection('users').where('username', '==', username).limit(1).get();
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0];
+          return { id: doc.id, ...doc.data() };
+        }
+      } catch (err) {}
     }
     const data = loadLocalData();
     return data.users.find(u => u.username.toLowerCase() === username.trim().toLowerCase()) || null;
@@ -382,7 +407,9 @@ export const db = {
   async createUser(userData) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('users').doc(userData.id).set(userData);
+      try {
+        await firestore.collection('users').doc(userData.id).set(userData);
+      } catch (err) {}
     }
     const data = loadLocalData();
     data.users.push(userData);
@@ -393,7 +420,9 @@ export const db = {
   async updateUser(id, updates) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('users').doc(id).set(updates, { merge: true });
+      try {
+        await firestore.collection('users').doc(id).set(updates, { merge: true });
+      } catch (err) {}
     }
     const data = loadLocalData();
     const idx = data.users.findIndex(u => u.id === id);
@@ -408,7 +437,9 @@ export const db = {
   async deleteUser(id) {
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('users').doc(id).delete();
+      try {
+        await firestore.collection('users').doc(id).delete();
+      } catch (err) {}
     }
     const data = loadLocalData();
     data.users = data.users.filter(u => u.id !== id);
@@ -420,10 +451,14 @@ export const db = {
   async getActivityLogs(limit = 20) {
     const firestore = getFirestore();
     if (firestore) {
-      const snapshot = await firestore.collection('activity_logs').orderBy('timestamp', 'desc').limit(limit).get();
-      const logs = [];
-      snapshot.forEach(doc => logs.push({ id: doc.id, ...doc.data() }));
-      return logs;
+      try {
+        const snapshot = await firestore.collection('activity_logs').orderBy('timestamp', 'desc').limit(limit).get();
+        if (!snapshot.empty) {
+          const logs = [];
+          snapshot.forEach(doc => logs.push({ id: doc.id, ...doc.data() }));
+          return logs;
+        }
+      } catch (err) {}
     }
     const data = loadLocalData();
     return (data.activity_logs || []).slice(0, limit);
@@ -447,7 +482,9 @@ export const db = {
 
     const firestore = getFirestore();
     if (firestore) {
-      await firestore.collection('activity_logs').doc(newLog.id).set(newLog);
+      try {
+        await firestore.collection('activity_logs').doc(newLog.id).set(newLog);
+      } catch (err) {}
     }
 
     if (!data.activity_logs) data.activity_logs = [];
@@ -460,10 +497,12 @@ export const db = {
   async clearActivityLogs() {
     const firestore = getFirestore();
     if (firestore) {
-      const snapshot = await firestore.collection('activity_logs').get();
-      const batch = firestore.batch();
-      snapshot.forEach(doc => batch.delete(doc.ref));
-      await batch.commit();
+      try {
+        const snapshot = await firestore.collection('activity_logs').get();
+        const batch = firestore.batch();
+        snapshot.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+      } catch (err) {}
     }
     const data = loadLocalData();
     data.activity_logs = [];
