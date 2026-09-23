@@ -11,11 +11,41 @@ let firestoreDb = null;
 let isFirestoreHealthy = false;
 
 export async function initFirebase() {
-  const serviceAccountPath = process.env.FIREBASE_KEY_PATH || path.join(__dirname, 'serviceAccountKey.json');
-  
-  if (fs.existsSync(serviceAccountPath)) {
+  let serviceAccount = null;
+
+  // 1. Direct JSON string or base64 from environment variable (Best for Render / Cloud hosting)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      let raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+      if (raw.startsWith('{')) {
+        serviceAccount = JSON.parse(raw);
+      } else {
+        const decoded = Buffer.from(raw, 'base64').toString('utf8');
+        serviceAccount = JSON.parse(decoded);
+      }
+    } catch (e) {
+      console.warn('⚠️ [Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT env var:', e.message);
+    }
+  }
+
+  // 2. Secret file from Render (/etc/secrets/...) or custom path or local server directory
+  if (!serviceAccount) {
+    const renderSecretPath = '/etc/secrets/serviceAccountKey.json';
+    const serviceAccountPath = process.env.FIREBASE_KEY_PATH || 
+      (fs.existsSync(renderSecretPath) ? renderSecretPath : path.join(__dirname, 'serviceAccountKey.json'));
+
+    if (fs.existsSync(serviceAccountPath)) {
+      try {
+        serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      } catch (err) {
+        console.warn('⚠️ [Firebase] Failed to parse serviceAccountKey.json:', err.message);
+      }
+    }
+  }
+
+  // 3. Initialize with Service Account object
+  if (serviceAccount) {
+    try {
       if (!admin.apps.length) {
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount)
@@ -42,9 +72,12 @@ export async function initFirebase() {
 
       return firestoreDb;
     } catch (err) {
-      console.warn('⚠️ [Firebase] Failed to parse serviceAccountKey.json:', err.message);
+      console.warn('⚠️ [Firebase] Initialization failed:', err.message);
     }
-  } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+  } 
+  
+  // 4. Individual environment credentials
+  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
     try {
       if (!admin.apps.length) {
         admin.initializeApp({
@@ -69,9 +102,9 @@ export async function initFirebase() {
     } catch (err) {
       console.warn('⚠️ [Firebase] Failed to initialize from env vars:', err.message);
     }
-  } else {
-    console.log('⚡ [Database] Using built-in local persistent database engine.');
   }
+
+  console.log('⚡ [Database] Using built-in local persistent database engine.');
   return null;
 }
 
