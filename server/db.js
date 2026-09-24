@@ -228,9 +228,20 @@ function loadLocalData() {
 
 function saveLocalData(data) {
   localCache = data;
-  const dir = path.dirname(DATA_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+  try {
+    const dir = path.dirname(DATA_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    try {
+      const tmpDir = '/tmp';
+      if (fs.existsSync(tmpDir)) {
+        fs.writeFileSync(path.join(tmpDir, 'database.json'), JSON.stringify(data, null, 2), 'utf8');
+      }
+    } catch (e) {
+      // localCache remains in-memory
+    }
+  }
 }
 
 function checkExpirations(keys) {
@@ -314,7 +325,7 @@ export const db = {
     }
     const data = loadLocalData();
     if (checkExpirations(data.keys)) saveLocalData(data);
-    return data.keys.find(k => k.user_key.toLowerCase() === user_key.trim().toLowerCase()) || null;
+    return data.keys.find(k => k && k.user_key && k.user_key.toLowerCase() === user_key.trim().toLowerCase()) || null;
   },
 
   async createKey(keyData) {
@@ -331,23 +342,35 @@ export const db = {
   },
 
   async updateKey(user_key, updates) {
+    if (!user_key) return null;
     const firestore = getFirestore();
+    let firestoreUpdatedDoc = null;
     if (firestore) {
       try {
         await firestore.collection('keys').doc(user_key).set(updates, { merge: true });
+        const snap = await firestore.collection('keys').doc(user_key).get();
+        if (snap.exists) {
+          firestoreUpdatedDoc = { id: snap.id, ...snap.data() };
+        }
       } catch (err) {}
     }
     const data = loadLocalData();
-    const idx = data.keys.findIndex(k => k.user_key.toLowerCase() === user_key.trim().toLowerCase());
+    const idx = data.keys.findIndex(k => k && k.user_key && k.user_key.toLowerCase() === user_key.trim().toLowerCase());
     if (idx !== -1) {
       data.keys[idx] = { ...data.keys[idx], ...updates };
       saveLocalData(data);
       return data.keys[idx];
     }
+    if (firestoreUpdatedDoc) {
+      data.keys.unshift(firestoreUpdatedDoc);
+      saveLocalData(data);
+      return firestoreUpdatedDoc;
+    }
     return null;
   },
 
   async deleteKey(user_key) {
+    if (!user_key) return false;
     const firestore = getFirestore();
     if (firestore) {
       try {
@@ -355,7 +378,7 @@ export const db = {
       } catch (err) {}
     }
     const data = loadLocalData();
-    data.keys = data.keys.filter(k => k.user_key.toLowerCase() !== user_key.trim().toLowerCase());
+    data.keys = data.keys.filter(k => k && k.user_key && k.user_key.toLowerCase() !== user_key.trim().toLowerCase());
     saveLocalData(data);
     return true;
   },
@@ -390,6 +413,7 @@ export const db = {
   },
 
   async getUserByUsername(username) {
+    if (!username) return null;
     const firestore = getFirestore();
     if (firestore) {
       try {
@@ -401,7 +425,7 @@ export const db = {
       } catch (err) {}
     }
     const data = loadLocalData();
-    return data.users.find(u => u.username.toLowerCase() === username.trim().toLowerCase()) || null;
+    return data.users.find(u => u && u.username && u.username.toLowerCase() === username.trim().toLowerCase()) || null;
   },
 
   async createUser(userData) {

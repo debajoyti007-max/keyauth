@@ -33,8 +33,8 @@ function calculateExpiryDate(duration) {
   }
 }
 
-// Handshake endpoint for C++ Android Client
-router.post('/connect', async (req, res) => {
+// Handshake handler for C++ Android Client
+async function handleConnect(req, res) {
   try {
     const game = (req.body.game || req.query.game || "").trim();
     const user_key = (req.body.user_key || req.query.user_key || "").trim();
@@ -157,6 +157,10 @@ router.post('/connect', async (req, res) => {
       reason: "Internal server error during handshake."
     });
   }
-});
+}
+
+// Support both /connect and / paths
+router.post('/connect', handleConnect);
+router.post('/', handleConnect);
 
 export default router;
